@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🖥️ Digital Balance
+# 🖥️ Digital Denge
 
 ### Understand your screen time. Build better digital habits.
 
