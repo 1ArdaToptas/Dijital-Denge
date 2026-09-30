@@ -1,6 +1,8 @@
 <div align="center">
 
-# 🖥️ Digital Denge
+<img src="assets/dijital_denge_icon2.png" width="120" alt="Dijital Denge">
+
+# Dijital Denge
 
 ### Understand your screen time. Build better digital habits.
 
@@ -29,11 +31,11 @@ between productivity and screen time.
 
 ## 🌟 Overview
 
-**Digital Balance** is a desktop productivity and screen-time tracking
+**Dijital Denge** is a desktop productivity and screen-time tracking
 application designed to help users understand how they spend their time
 on their computer.
 
-Instead of simply showing total screen time, Digital Balance provides
+Instead of simply showing total screen time, Dijital Denge provides
 a deeper view of your digital activity through:
 
 - 📊 Usage analytics
@@ -111,7 +113,7 @@ Explore your computer usage day by day.
 
 ### ☕ Smart Breaks
 
-Digital Balance distinguishes between normal app switching
+Dijital Denge distinguishes between normal app switching
 and actual breaks.
 
 - Short breaks
@@ -160,12 +162,10 @@ The score considers usage behavior such as:
 
 # 🖼️ Interface
 
-> Screenshots of the application can be added here.
-
 ### 🏠 Dashboard
 
 <p align="center">
-  <img src="docs/screenshots/dashboard.png" alt="Digital Balance Dashboard" width="900">
+  <img src="docs/dashboard.png" alt="Dijital Denge Dashboard" width="900">
 </p>
 
 The dashboard provides a clean overview of your current computer
@@ -176,7 +176,7 @@ activity and recent usage trends.
 ### 📈 Statistics
 
 <p align="center">
-  <img src="docs/screenshots/statistics.png" alt="Digital Balance Statistics" width="900">
+  <img src="docs/statistics.png" alt="Dijital Denge Statistics" width="900">
 </p>
 
 The statistics page provides detailed charts and historical analysis.
@@ -186,7 +186,7 @@ The statistics page provides detailed charts and historical analysis.
 ### 🖥️ Applications
 
 <p align="center">
-  <img src="docs/screenshots/applications.png" alt="Digital Balance Applications" width="900">
+  <img src="docs/applications.png" alt="Dijital Denge Applications" width="900">
 </p>
 
 See which applications you use most and how much time you spend in each one.
@@ -196,10 +196,32 @@ See which applications you use most and how much time you spend in each one.
 ### ⏱️ Sessions
 
 <p align="center">
-  <img src="docs/screenshots/sessions.png" alt="Digital Balance Sessions" width="900">
+  <img src="docs/sessions.png" alt="Dijital Denge Sessions" width="900">
 </p>
 
 Review your application sessions and breaks through a visual timeline.
+
+---
+
+### 📅 Calendar
+
+<p align="center">
+  <img src="docs/calendar.png" alt="Dijital Denge Calendar" width="900">
+</p>
+
+Explore your computer usage throughout the month and inspect
+individual days in more detail.
+
+---
+
+### ⚙️ Settings
+
+<p align="center">
+  <img src="docs/settings.png" alt="Dijital Denge Settings" width="900">
+</p>
+
+Customize application preferences including language, theme,
+goals, reminders, notifications, and Windows startup options.
 
 ---
 
@@ -224,7 +246,7 @@ without requiring the user to analyze raw data.
 
 # 📈 Analytics
 
-Digital Balance turns raw usage information into visual insights.
+Dijital Denge turns raw usage information into visual insights.
 
 ### Daily Usage
 
