@@ -17,16 +17,14 @@ from datetime import datetime, timedelta
 import ctypes
 from ctypes import wintypes
 
-import os
-import sys
-
 def resource_path(relative_path):
     try:
         base_path = sys._MEIPASS
     except Exception:
         base_path = os.path.dirname(os.path.abspath(__file__))
-
     return os.path.join(base_path, relative_path)
+
+ASSETS_DIR = resource_path("assets")
 # Windows API handle'ları modül seviyesinde tanımlanır.
 # Overlay fonksiyonları farklı metotlardan da bunlara erişebilsin.
 if os.name == "nt":
@@ -220,27 +218,6 @@ def double_confirm_reset(parent, title, message, final_message):
 
 
 class LASTINPUTINFO(ctypes.Structure):
-
-
-    def _confirm_monthly_reset(self, action):
-        month = datetime.now().strftime("%Y-%m")
-        if double_confirm_reset(
-            self,
-            "Aylık Veri Sıfırlama",
-            f"{month} ayındaki tüm kullanım verileri silinecek.",
-            f"{month} ayındaki verileri kalıcı olarak silmek istediğinizden emin misiniz?"
-        ):
-            action()
-
-    def _confirm_all_data_reset(self, action):
-        if double_confirm_reset(
-            self,
-            "Tüm Verileri Sıfırla",
-            "Sistemde tutulan TÜM kullanım verileri silinecek.",
-            "Tüm kullanım geçmişini ve arşivlenmiş verileri kalıcı olarak silmek istediğinizden emin misiniz?"
-        ):
-            action()
-
     _fields_ = [("cbSize", wintypes.UINT), ("dwTime", wintypes.DWORD)]
 
 
@@ -533,15 +510,6 @@ def get_today_snapshot():
         return today, (copy.deepcopy(day) if day else yeni_gun())
 
 
-def get_days_snapshot(prefix=None):
-
-    with data_lock:
-        days = bellek_db.get("days", {})
-        if prefix is None:
-            return copy.deepcopy(days)
-        return {k: copy.deepcopy(v) for k, v in days.items() if k.startswith(prefix)}
-
-
 def get_day_snapshot(date_key):
 
     with data_lock:
@@ -553,7 +521,15 @@ def get_day_snapshot(date_key):
     return copy.deepcopy(day) if day is not None else yeni_gun()
 
 
-def get_days_snapshot(date_keys):
+def get_days_snapshot(date_keys=None, prefix=None):
+
+    if date_keys is None and prefix is not None:
+        with data_lock:
+            days = bellek_db.get("days", {})
+            return {k: copy.deepcopy(v) for k, v in days.items() if k.startswith(prefix)}
+    if date_keys is None:
+        with data_lock:
+            return copy.deepcopy(bellek_db.get("days", {}))
 
     requested = set(date_keys)
     with data_lock:
@@ -842,7 +818,12 @@ class ActivityTracker:
 
     def _snooze_warning_overlay(self):
         self._close_warning_overlay()
-        self._warning_overlay_after_id = self.after(10 * 60 * 1000, self.show_fullscreen_warning)
+        timer = getattr(self, "_warning_snooze_timer", None)
+        if timer and timer.is_alive():
+            timer.cancel()
+        self._warning_snooze_timer = threading.Timer(10 * 60, self.show_fullscreen_warning)
+        self._warning_snooze_timer.daemon = True
+        self._warning_snooze_timer.start()
 
     def show_fullscreen_warning(self):
 
@@ -854,7 +835,10 @@ class ActivityTracker:
         if _native_warning_thread and _native_warning_thread.is_alive():
             return
 
-        self._warning_overlay_after_id = None
+        timer = getattr(self, "_warning_snooze_timer", None)
+        if timer and timer.is_alive():
+            timer.cancel()
+        self._warning_snooze_timer = None
         _native_warning_app = self
         _native_warning_stop = threading.Event()
         _native_warning_ready = threading.Event()
@@ -952,7 +936,7 @@ class ActivityTracker:
                 gdi32.DeleteObject.argtypes = [wintypes.HGDIOBJ]
                 gdi32.SetBkMode.argtypes = [wintypes.HDC, ctypes.c_int]
                 gdi32.SetTextColor.argtypes = [wintypes.HDC, wintypes.COLORREF]
-                gdi32.FillRect.argtypes = [wintypes.HDC, ctypes.POINTER(wintypes.RECT), wintypes.HBRUSH]
+                user32.FillRect.argtypes = [wintypes.HDC, ctypes.POINTER(wintypes.RECT), wintypes.HBRUSH]
                 gdi32.RoundRect.argtypes = [wintypes.HDC, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int]
 
                 def rgb(r, g, b):
@@ -1035,13 +1019,15 @@ class ActivityTracker:
                         x = ctypes.c_short(lparam & 0xffff).value
                         y = ctypes.c_short((lparam >> 16) & 0xffff).value
                         app = _native_warning_app
-                        if app:
-                            if 242 <= x <= 490 and 195 <= y <= 245:
-                                app.after(0, app._close_warning_overlay)
-                            elif 35 <= x <= 230 and 195 <= y <= 245:
-                                app.after(0, app._snooze_warning_overlay)
-                            elif x > 450 and y < 70:
-                                app.after(0, app._close_warning_overlay)
+                        if 242 <= x <= 490 and 195 <= y <= 245:
+                            user32.PostMessageW(hwnd, WM_CLOSE, 0, 0)
+                        elif 35 <= x <= 230 and 195 <= y <= 245:
+                            if app:
+                                app._snooze_warning_overlay()
+                            else:
+                                user32.PostMessageW(hwnd, WM_CLOSE, 0, 0)
+                        elif x > 450 and y < 70:
+                            user32.PostMessageW(hwnd, WM_CLOSE, 0, 0)
                         return 0
 
                     if msg == WM_CLOSE:
@@ -1149,9 +1135,9 @@ class ActivityTracker:
             log_error("Windows Toast", "winotify kurulu degil")
             return False
         try:
-            icon_path = os.path.join(BASE_DIR, "assets", "dijital_denge_icon2.png")
+            icon_path = os.path.join(ASSETS_DIR, "dijital_denge_icon2.png")
             if not os.path.exists(icon_path):
-                icon_path = os.path.join(BASE_DIR, "assets", "dijital_denge_logo.png")
+                icon_path = os.path.join(ASSETS_DIR, "dijital_denge_icon.png")
             kwargs = {"app_id": APP_NAME, "title": title, "msg": message}
             if os.path.exists(icon_path):
                 kwargs["icon"] = icon_path
@@ -1917,8 +1903,7 @@ TRANSLATIONS.update({
     "Aylık Günlük Kullanım":{"en":"Monthly Daily Usage","de":"Tägliche Monatsnutzung","fr":"Utilisation quotidienne mensuelle","es":"Uso diario mensual","it":"Utilizzo giornaliero mensile","pt":"Uso diário mensal","nl":"Maandelijks dagelijks gebruik"},
     "Günlük Saatlik Kullanım":{"en":"Daily Hourly Usage","de":"Stündliche Tagesnutzung","fr":"Utilisation horaire quotidienne","es":"Uso por hora diario","it":"Utilizzo orario giornaliero","pt":"Uso horário diário","nl":"Dagelijks gebruik per uur"},
     "Aylık":{"en":"Monthly","de":"Monatlich","fr":"Mensuel","es":"Mensual","it":"Mensile","pt":"Mensal","nl":"Maandelijks"},
-    "Uygulama":{"en":"Application","de":"Anwendung","fr":"Application","es":"Aplicación","it":"Applicazione","pt":"Aplicação","nl":"Applicatie"},
-    "Günlük veriye tıklayarak ayrıntıları görebilirsin":{"en":"Click a day to see details","de":"Klicke auf einen Tag für Details","fr":"Cliquez sur un jour pour voir les détails","es":"Haz clic en un día para ver los detalles","it":"Fai clic su un giorno per i dettagli","pt":"Clique num dia para ver os detalhes","nl":"Klik op een dag voor details"},
+    "Günlük veriye tıklayarak ayrıntıları görebilirsin":{"en":"Click a day to see details","de":"Klicke auf einen Tag für Details","fr":"Cliquez sur un jour pour voir les détails","es":"Haz clic en un día para ver los details","it":"Fai clic su un giorno per i dettagli","pt":"Clique num dia para ver os detalhes","nl":"Klik op een dag voor details"},
     "Pay":{"en":"Share","de":"Anteil","fr":"Part","es":"Porcentaje","it":"Quota","pt":"Participação","nl":"Aandeel"},
 })
 
@@ -2032,6 +2017,7 @@ def _resolve_app_exe(app_name):
                 return line
     except Exception:
         pass
+    _APP_ICON_CACHE[("path",key)]=None
     return None
 
 
@@ -2153,8 +2139,7 @@ class DashboardApp(ctk.CTk):
 
         # Uygulama simgesi
         icon_path = os.path.join(
-            BASE_DIR,
-            "assets",
+            ASSETS_DIR,
             "dijital_denge_icon2.ico"
         )
 
@@ -2394,8 +2379,8 @@ class DashboardApp(ctk.CTk):
 
     def _load_brand_assets(self):
         try:
-            icon_path = os.path.join(BASE_DIR, "assets", "dijital_denge_icon2.png")
-            wordmark_path = os.path.join(BASE_DIR, "assets", "dijital_denge_icon2.png")
+            icon_path = os.path.join(ASSETS_DIR, "dijital_denge_icon2.png")
+            wordmark_path = os.path.join(ASSETS_DIR, "dijital_denge_icon2.png")
             if os.path.exists(icon_path):
                 self.logo_icon = ctk.CTkImage(
                     light_image=Image.open(icon_path), dark_image=Image.open(icon_path),
@@ -2538,10 +2523,6 @@ class DashboardApp(ctk.CTk):
         for key in self.nav_buttons:
             self._set_nav_active(key, key == page)
 
-
-        if self._page_built.get(page, False):
-            self._activate_page(page)
-            return
 
         getattr(self, {"dashboard":"show_dashboard", "apps":"show_apps", "sessions":"show_sessions", "stats":"show_stats", "settings":"show_settings"}[page])()
 
@@ -2915,12 +2896,15 @@ class DashboardApp(ctk.CTk):
         top = ctk.CTkFrame(frame, fg_color="transparent")
         top.pack(fill="x", padx=17, pady=(0, 3))
 
-        ctk.CTkLabel(
+        see_all_btn = ctk.CTkLabel(
             top,
             text=translate("Tümünü Gör", self.language) + "  →",
             font=("Segoe UI", 12, "bold"),
-            text_color="#38bdf8"
-        ).pack(side="right")
+            text_color="#38bdf8",
+            cursor="hand2"
+        )
+        see_all_btn.pack(side="right")
+        see_all_btn.bind("<Button-1>", lambda e: self.navigate("stats"))
 
         self.draw_week_chart(frame, week_days)
 
@@ -3025,12 +3009,13 @@ class DashboardApp(ctk.CTk):
             text_color=("#1e293b", "#e2e8f0")
         ).pack(side="left")
 
-        ctk.CTkLabel(
+        goal_percent = ctk.CTkLabel(
             top,
             text=f"%{int(ratio * 100)}",
             font=("Segoe UI", 12, "bold"),
             text_color="#22c55e"
-        ).pack(side="right")
+        )
+        goal_percent.pack(side="right")
 
         bar = ctk.CTkProgressBar(
             frame, height=8,
@@ -3040,12 +3025,21 @@ class DashboardApp(ctk.CTk):
         bar.set(ratio)
         bar.pack(fill="x", padx=17, pady=(4, 3))
 
-        ctk.CTkLabel(
+        goal_text = ctk.CTkLabel(
             frame,
             text=f"{format_seconds(total)} / {format_seconds(goal)}",
             font=("Segoe UI", 12),
             text_color=("#64748b", "#94a3b8")
-        ).pack(anchor="w", padx=17, pady=(0, 12))
+        )
+        goal_text.pack(anchor="w", padx=17, pady=(0, 12))
+
+        goal_progress = bar
+
+        self.dash_widgets.update({
+            "goal_progress": goal_progress,
+            "goal_percent": goal_percent,
+            "goal_text": goal_text,
+        })
 
         self._dashboard_widgets = self.dash_widgets
 
@@ -3061,7 +3055,24 @@ class DashboardApp(ctk.CTk):
         if self.current_page != "dashboard" or not self.dash_widgets:
             return
         _, day = get_today_snapshot()
-        status = get_live_status()
+        total = int(day.get("total_active_seconds", 0) or 0)
+        longest = int(day.get("longest_continuous_seconds", 0) or 0)
+        breaks = day.get("breaks", [])
+        score = self.calculate_score(day)
+
+        self.dash_widgets["total"].configure(text=format_seconds(total))
+        self.dash_widgets["longest"].configure(text=format_seconds(longest))
+        self.dash_widgets["breaks"].configure(text=str(len(breaks)))
+        self.dash_widgets["score"].configure(text=f"{score}/100")
+
+        settings = get_settings()
+        goal = int(settings.get("daily_goal_seconds", 6 * 3600) or 0)
+        ratio = min(1.0, total / goal) if goal > 0 else 0
+        self.dash_widgets["goal_progress"].set(ratio)
+        self.dash_widgets["goal_percent"].configure(text=f"%{int(ratio * 100)}")
+        self.dash_widgets["goal_text"].configure(
+            text=f"{format_seconds(total)} / {format_seconds(goal)}"
+        )
 
     def show_apps(self):
         self._begin_page_build("apps")
@@ -3165,7 +3176,7 @@ class DashboardApp(ctk.CTk):
             if not name: return
             if name in get_all_categories(): return
             with data_lock: bellek_db.setdefault("custom_categories",{})[name]={"created_at":datetime.now().isoformat()}
-            veri_diske_yaz(); win.destroy(); self.show_apps()
+            veri_diske_yaz(); win.destroy(); self.navigate("apps")
         ctk.CTkButton(win,text=translate("Kategori Oluştur", self.language),command=save).pack(pady=20)
 
     def show_sessions(self):
@@ -4488,6 +4499,8 @@ class DashboardApp(ctk.CTk):
         width = max(canvas.winfo_width(), 700)
         hours = [0.0] * 24
         for item in day_data.get("sessions", []):
+            if item.get("type") != "application":
+                continue
             try:
                 start = datetime.fromisoformat(item.get("start"))
                 remaining = max(0.0, float(item.get("duration_seconds", 0)))
@@ -4601,7 +4614,6 @@ class DashboardApp(ctk.CTk):
         self.draw_app_pie_chart(pie_box, apps, total)
 
         # Uygulama tablosu
-        apps = apps
         ctk.CTkLabel(box, text=translate("UYGULAMA KULLANIMI", self.language), font=("Segoe UI", 12, "bold")).pack(anchor="w", padx=20, pady=(4, 6))
         table = ctk.CTkFrame(box, fg_color=("#d6d9dd", "#172033"), corner_radius=10)
         table.pack(fill="x", padx=20, pady=(0, 12))
@@ -4674,10 +4686,10 @@ class DashboardApp(ctk.CTk):
 
         # Fetched once for the whole grid instead of once per day cell.
         goal = max(1, int(get_settings().get("daily_goal_seconds", 6 * 3600)))
-        day_text_color = "#111827" if is_light else "#000000"
-        sub_text_color = "#334155" if is_light else "#cbd5e1"
+        day_text_color = "#111827" if is_light else "#f8fafc"
+        sub_text_color = "#475569" if is_light else "#cbd5e1"
         track_color = "#aeb4ba" if is_light else "#334155"
-        border_color = "#8b949e" if is_light else "#475569"
+        border_color = "#8b949e" if is_light else "#334b63"
 
         cells = []  # (x0, y0, x1, y1, key) for click hit-testing
         for r, week in enumerate(weeks):
@@ -4689,16 +4701,18 @@ class DashboardApp(ctk.CTk):
                 key = f"{now.year:04d}-{now.month:02d}-{day_num:02d}"
                 sec = days.get(key, {}).get("total_active_seconds", 0)
                 ratio = min(1.0, sec / goal)
-                if sec <= 0:
-                    cell_fg, accent = "#d6d9dd", "#64748b"
-                elif ratio < 0.50:
-                    cell_fg, accent = "#cfe8d5", "#16a34a"
-                elif ratio < 0.80:
-                    cell_fg, accent = "#eee4b4", "#ca8a04"
+                if is_light:
+                    if sec <= 0: cell_fg, accent = "#d6d9dd", "#64748b"
+                    elif ratio < 0.50: cell_fg, accent = "#cfe8d5", "#16a34a"
+                    elif ratio < 0.80: cell_fg, accent = "#eee4b4", "#ca8a04"
+                    else: cell_fg, accent = "#eccaca", "#dc2626"
                 else:
-                    cell_fg, accent = "#eccaca", "#dc2626"
+                    if sec <= 0: cell_fg, accent = "#17293d", "#64748b"
+                    elif ratio < 0.50: cell_fg, accent = "#133827", "#22c55e"
+                    elif ratio < 0.80: cell_fg, accent = "#383119", "#f59e0b"
+                    else: cell_fg, accent = "#3d1b22", "#ef4444"
                 if key == selected_key:
-                    cell_fg = "#c1d5e6" if is_light else "#1e3a5f"
+                    cell_fg = "#93c5fd" if is_light else "#0369a1"
 
                 canvas.create_rectangle(x0, y0, x1, y1, fill=cell_fg, outline=border_color, width=2)
                 canvas.create_text(
@@ -4863,7 +4877,7 @@ class DashboardApp(ctk.CTk):
     def export_json(self):
         try:
             import tkinter.filedialog as fd
-            path=fd.asksaveasfilename(defaultextension=".json",filetypes=[("JSON","*.json")],initialfile="dijital_denge_icon2.json")
+            path=fd.asksaveasfilename(defaultextension=".json",filetypes=[("JSON","*.json")],initialfile=f"dijital_denge_yedek_{datetime.now().strftime('%Y%m%d')}.json")
             if path:
                 with open(path,"w",encoding="utf-8") as f: json.dump(get_db_snapshot(),f,ensure_ascii=False,indent=2)
         except Exception as e: log_error("Dışa aktarma",e)
@@ -5110,9 +5124,9 @@ class CustomWindowsTray:
             log_error("Tepsi simgesi", OSError(f"CreateWindowExW failed: {ctypes.get_last_error()}"))
             return
 
-        icon_path = os.path.join(BASE_DIR, "assets", "dijital_denge_icon2.ico")
+        icon_path = os.path.join(ASSETS_DIR, "dijital_denge_icon2.ico")
         if not os.path.exists(icon_path):
-            icon_path = os.path.join(BASE_DIR, "assets", "dijital_denge_icon.ico")
+            icon_path = os.path.join(ASSETS_DIR, "dijital_denge_icon3.ico")
 
         if os.path.exists(icon_path):
             self.hicon = user32.LoadImageW(
@@ -5207,9 +5221,9 @@ def _tepsi_kullanim_metni():
 
 
 def _tray_icon_image():
-    icon_path = os.path.join(BASE_DIR, "assets", "dijital_denge_icon2.png")
+    icon_path = os.path.join(ASSETS_DIR, "dijital_denge_icon2.png")
     if not os.path.exists(icon_path):
-        icon_path = os.path.join(BASE_DIR, "assets", "dijital_denge_logo.png")
+        icon_path = os.path.join(ASSETS_DIR, "dijital_denge_icon.png")
     try:
         return Image.open(icon_path).convert("RGBA")
     except Exception:
